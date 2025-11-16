@@ -2,6 +2,7 @@ package storage
 
 import (
 	"database/sql"
+	"fmt"
 	"time"
 
 	"github.com/ilya2044/avito2025/internal/model"
@@ -26,19 +27,41 @@ func (r *Repository) CreateTeam(team model.Team) error {
 		return err
 	}
 	defer tx.Rollback()
+
+	var exists bool
+	err = tx.QueryRow("SELECT EXISTS(SELECT 1 FROM teams WHERE team_name=$1)", team.TeamName).Scan(&exists)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return fmt.Errorf("team %s already exists", team.TeamName)
+	}
+
+	for _, m := range team.Members {
+		var userExists bool
+		err := tx.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE user_id=$1)", m.UserID).Scan(&userExists)
+		if err != nil {
+			return err
+		}
+		if userExists {
+			return fmt.Errorf("user %s already exists", m.UserID)
+		}
+	}
+
 	_, err = tx.Exec("INSERT INTO teams(team_name) VALUES($1)", team.TeamName)
 	if err != nil {
 		return err
 	}
+
 	for _, m := range team.Members {
 		_, err = tx.Exec(`INSERT INTO users(user_id, username, team_name, is_active)
-			VALUES($1,$2,$3,$4)
-			ON CONFLICT (user_id) DO UPDATE SET username = EXCLUDED.username, team_name = EXCLUDED.team_name, is_active = EXCLUDED.is_active`,
+			VALUES($1,$2,$3,$4)`,
 			m.UserID, m.Username, team.TeamName, m.IsActive)
 		if err != nil {
-			return err
+			return fmt.Errorf("cannot add user %s: %w", m.UserID, err)
 		}
 	}
+
 	return tx.Commit()
 }
 
@@ -226,4 +249,33 @@ ORDER BY pr.created_at DESC`, userID)
 		res = append(res, p)
 	}
 	return res, nil
+}
+
+func (r *Repository) AddUserToTeam(teamName string, u model.User) (model.Team, error) {
+	var exists int
+	err := r.DB.QueryRow("SELECT COUNT(1) FROM users WHERE user_id=$1", u.UserID).Scan(&exists)
+	if err != nil {
+		return model.Team{}, err
+	}
+	if exists > 0 {
+		return model.Team{}, fmt.Errorf("user_id %s already exists", u.UserID)
+	}
+	_, err = r.DB.Exec(`INSERT INTO users(user_id, username, team_name, is_active) VALUES($1,$2,$3,$4)`,
+		u.UserID, u.Username, teamName, u.IsActive)
+	if err != nil {
+		return model.Team{}, err
+	}
+	return r.GetTeam(teamName)
+}
+
+func (r *Repository) RemoveUserFromTeam(teamName, userID string) (model.Team, error) {
+	res, err := r.DB.Exec("DELETE FROM users WHERE user_id=$1 AND team_name=$2", userID, teamName)
+	if err != nil {
+		return model.Team{}, err
+	}
+	cnt, _ := res.RowsAffected()
+	if cnt == 0 {
+		return model.Team{}, fmt.Errorf("user_id %s not found in team %s", userID, teamName)
+	}
+	return r.GetTeam(teamName)
 }
