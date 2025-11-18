@@ -1,17 +1,19 @@
+version: "3.9"
+
 services:
   db:
     image: postgres:15
     container_name: avito2025-db
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASS}
+      POSTGRES_DB: ${DB_NAME}
     volumes:
       - avito2025_pgdata:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "${DB_PORT}:${DB_PORT}"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER}"]
       interval: 2s
       timeout: 3s
       retries: 10
@@ -22,14 +24,13 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    environment:
-      PGPASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - ./internal/migrations:/migrations
-    entrypoint: [
-      "sh", "-c",
-      "psql -h ${DB_HOST} -U ${DB_USER} -d ${DB_NAME} -f /migrations/0001_init.sql"
-    ]
+    environment:
+      PGPASSWORD: ${DB_PASS}
+    entrypoint: >
+      sh -c "psql -h ${DB_HOST} -U ${DB_USER} -d ${DB_NAME} -f /migrations/0001_init.sql"
+
 
   app:
     build:
@@ -42,12 +43,13 @@ services:
     environment:
       DB_HOST: ${DB_HOST}
       DB_USER: ${DB_USER}
-      DB_PASSWORD: ${DB_PASSWORD}
+      DB_PASSWORD: ${DB_PASS}
       DB_NAME: ${DB_NAME}
       DB_PORT: ${DB_PORT}
     ports:
-      - "8080:8080"
+      - "${APP_PORT}:8080"
     command: ["/pr-reviewer"]
+
 
 volumes:
   avito2025_pgdata:
